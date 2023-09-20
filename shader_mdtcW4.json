@@ -1,0 +1,142 @@
+{
+ "ver": "0.1",
+ "info": {
+  "id": "mdtcW4",
+  "date": "1695174005",
+  "viewed": 8,
+  "name": "wee interpreter 0.1",
+  "description": "VM for https://github.com/nathanfarlow/wee implemented in GLSL.\nLogic for visuals and interactivity implemented in wee.\nClick to change color, hold arrow keys to change direction.\nNo guarantees on what happens when the pixel reaches the edge...",
+  "likes": 0,
+  "published": "Public",
+  "usePreview": 0,
+  "tags": [
+   "encoding",
+   "multipass",
+   "interpreter"
+  ],
+  "hasliked": 0,
+  "parentid": "",
+  "parentname": ""
+ },
+ "renderpass": [
+  {
+   "inputs": [
+    {
+     "id": "4dXGR8",
+     "filepath": "/media/previz/buffer00.png",
+     "type": "buffer",
+     "channel": 0,
+     "sampler": {
+      "filter": "linear",
+      "wrap": "clamp",
+      "vflip": "true",
+      "srgb": "false",
+      "internal": "byte"
+     },
+     "published": 1
+    },
+    {
+     "id": "XsXGR8",
+     "filepath": "/media/previz/buffer01.png",
+     "type": "buffer",
+     "channel": 1,
+     "sampler": {
+      "filter": "linear",
+      "wrap": "clamp",
+      "vflip": "true",
+      "srgb": "false",
+      "internal": "byte"
+     },
+     "published": 1
+    }
+   ],
+   "outputs": [
+    {
+     "id": "4dfGRr",
+     "channel": 0
+    }
+   ],
+   "code": "// change to DISPLAY_MEMORY or DISPLAY_INSTRUCTION to see internals\n#define DISPLAY_SCREEN\n\nvoid mainImage(out vec4 fragColor, in vec2 fragCoord) {\n#ifdef DISPLAY_SCREEN\n    vec2 uv = fragCoord / iResolution.xy;\n    ivec2 as = ivec2(uv * vec2(64, 36));\n    uint pixelNumber = kScreenAddr/3u + uint(as.y * 64 + as.x);\n    uint texelY = pixelNumber / kRowLen;\n    uint texelX = pixelNumber - texelY * kRowLen;\n    uvec4 word = b127_ieee754_decode(texelFetch(iChannel1, ivec2(texelX, texelY), 0));\n    fragColor = vec4(vec3(word.xyz) / 255.0, 1.0);\n    if (ivec2(texelX, texelY) == kBufferSize - 1) {\n        fragColor = vec4(0.5, 0.5, 0.5, 1.0);\n    }\n#endif\n#ifdef DISPLAY_MEMORY\n    vec4 tex = texelFetch(iChannel1, ivec2(fragCoord), 0);\n    fragColor = vec4(1.0 - vec3(b127_ieee754_decode(tex).xyz) / 255.0, 1.0);\n#endif\n#ifdef DISPLAY_INSTRUCTION\n    uint screen_row = uint(fragCoord.y);\n    uint screen_col = uint(fragCoord.x);\n    uint data_row = screen_row >> 1;\n    uint data_col = screen_col >> 1;\n    uint data_row_len = (kRowLen>>1);\n    uint data_index = data_row_len * data_row + data_col;\n    uvec4 registers = b127_ieee754_decode(texelFetch(iChannel1, kBufferSize - 1, 0));\n    if ((screen_row & 1u) == 1u) {\n        if ((screen_col & 1u) == 1u) {\n            // center\n            uint instruction = getInt(iChannel0, data_index);\n            fragColor = vec4(instruction >> 31, (instruction << 1) >> 31, (instruction << 2) >> 31, 1.0);\n        } else {\n            // check left/right\n            if (registers.z == data_index || registers.z + 1u == data_index) {\n                fragColor = vec4(0.5, 0.5, 0.5, 1.0);\n            } else {\n                fragColor = vec4(0.0);\n            }\n        }\n    } else {\n        if ((screen_col & 1u) == 1u) {\n            // check up/down\n            if (registers.z == data_index || registers.z + data_row_len == data_index) {\n                fragColor = vec4(0.5, 0.5, 0.5, 1.0);\n            } else {\n                fragColor = vec4(0.0);\n            }\n        } else {\n            // diagonals\n        }\n    }\n#endif\n    if (!all(greaterThanEqual(iResolution.xy, vec2(kBufferSize)))) {\n        fragColor = vec4(1.0, 0.0, 0.0, 1.0);\n    }\n}",
+   "name": "Image",
+   "description": "",
+   "type": "image"
+  },
+  {
+   "inputs": [],
+   "outputs": [],
+   "code": "/*\n\n\"127 bits per pixel\" by Theron Tarigo, www.shadertoy.com/user/ttg\n\nUtilizing all channels of an OpenGL 32-bit float buffer it is possible to store\n127 bits per pixel without using special float values\n(which get filtered out from buffers on some browsers).\n\n4x IEEE754 binary32 allows ((1<<24)*254)^4 distinct values or\n127.9547 bits of information.\n\nThe following implementations:\n  b127_ieee754_encode\n  b127_ieee754_decode\nare free for use, copying, and modification by anyone for any purpose,\nwithout restriction.\n\nAttribution should be included for providing clarity of the origin of these\nimplementations; including the original URL is sufficient attribution:\nhttps://www.shadertoy.com/view/wtKyR1\n\n*/\n\nvec4 b127_ieee754_encode (uvec4 v) {\n  v.w&=0x7FFFFFFFu;\n  uvec4 l = uvec4( v.xyz&0xFFFFFFu , v.x>>24 | v.y>>24<<8 | v.z>>24<<16 );\n  return uintBitsToFloat( (l&0x800000u)<<8 | l&0x7FFFFFu\n   | 1u+uvec4(v.w/uvec4(1,254,254*254,254*254*254))%254u <<23 );\n}\n\nuvec4 b127_ieee754_decode (vec4 f) {\n  uvec4 e = floatBitsToUint(f);\n  uvec4 l = (e&0x80000000u)>>8 | e&0x7FFFFFu;\n  uvec4 h = (e>>23&0xFFu)-1u;\n  return uvec4(\n    l.xyz | uvec3(l.w)>>uvec3(0,8,16)<<24,\n    h.x+254u*h.y+(254u*254u)*h.z+(254u*254u*254u)*h.w );\n}\n\n/*===========================================================================*/\nconst uint kRowLen = 640u;\nconst ivec2 kBufferSize = ivec2(kRowLen, 360);//vec2(1920, 1080);\nconst uint kRegsAddr = 230399u;\nconst uint kScreenAddr = 223488u;\n\nvec4 getPixel(sampler2D sampler, uint pixelNumber) {\n    uint texelY = pixelNumber / kRowLen;\n    uint texelX = pixelNumber - texelY * kRowLen;\n    return texelFetch(sampler, ivec2(texelX, texelY), 0);\n}\n\n#define getComponent(vec, c) (\\\n    c == 0u \\\n  ? vec.x \\\n  : c == 1u \\\n  ? vec.y \\\n  : c == 2u \\\n  ? vec.z \\\n  : vec.w )\n\nuint getInt(sampler2D sampler, uint offset) {\n    // sampler is a 2D array of vec4, size kBufferSize\n    // 3 32-bit uints in each vec4\n    uint pixelNumber = offset / 3u;\n    uint component = offset - pixelNumber * 3u;\n    uint texelY = pixelNumber / kRowLen;\n    uint texelX = pixelNumber - texelY * kRowLen;\n    uvec4 word = b127_ieee754_decode(texelFetch(sampler, ivec2(texelX, texelY), 0));\n    return component == 0u\n             ? word.x\n             : component == 1u\n             ? word.y\n             : component == 2u\n             ? word.z\n             : word.w;\n}\n",
+   "name": "Common",
+   "description": "",
+   "type": "common"
+  },
+  {
+   "inputs": [],
+   "outputs": [
+    {
+     "id": "4dXGR8",
+     "channel": 0
+    }
+   ],
+   "code": "const uvec3 lut[39] = uvec3[39](uvec3(0x00036900u, 0x20000000u, 0x00000000u),uvec3(0xa0000000u, 0x000000c0u, 0x20000000u),uvec3(0x00000001u, 0xa0000000u, 0x00038400u),uvec3(0x20000000u, 0x00000002u, 0xa0000000u),uvec3(0x00001b00u, 0x20000000u, 0x00000003u),uvec3(0xa0000000u, 0x00000001u, 0x80000000u),uvec3(0x20000000u, 0x00000000u, 0x80000000u),uvec3(0x40000000u, 0x20000000u, 0x00000004u),uvec3(0xa0000000u, 0x00000002u, 0x80000000u),uvec3(0x20000000u, 0xc0000000u, 0xe0000068u),uvec3(0x08000000u, 0x80000000u, 0x20000000u),uvec3(0x00000004u, 0x80000000u, 0xa0000000u),uvec3(0x20000000u, 0x00000001u, 0x40000000u),uvec3(0x20000000u, 0x08000001u, 0x80000000u),uvec3(0x20000000u, 0xa0000000u, 0x00000000u),uvec3(0x20000000u, 0x00000000u, 0x80000000u),uvec3(0xa0000000u, 0x20000000u, 0x00000001u),uvec3(0x40000000u, 0x20000000u, 0x00000000u),uvec3(0x20000000u, 0xa0000000u, 0x00000004u),uvec3(0x80000000u, 0x20000000u, 0x00000000u),uvec3(0xa0000000u, 0x02f76025u, 0x80000000u),uvec3(0xe0000045u, 0x1ffffffdu, 0x20000000u),uvec3(0x00000001u, 0xa0000000u, 0x00000000u),uvec3(0x02f76026u, 0x80000000u, 0xe0000050u),uvec3(0x000000c0u, 0x20000000u, 0x00000001u),uvec3(0xa0000000u, 0x00038400u, 0x20000000u),uvec3(0x00000002u, 0xa0000000u, 0x02f76027u),uvec3(0x80000000u, 0xe000005fu, 0x00000003u),uvec3(0x20000000u, 0x00000001u, 0xa0000000u),uvec3(0x00000000u, 0x80000000u, 0x20000000u),uvec3(0x000000c0u, 0x40000000u, 0x20000000u),uvec3(0x00000002u, 0xa0000000u, 0x02f76028u),uvec3(0x80000000u, 0xe0000010u, 0x1fffff40u),uvec3(0x20000000u, 0x00000001u, 0xa0000000u),uvec3(0x00000000u, 0xe0000010u, 0x00000003u),uvec3(0x80000000u, 0x20000000u, 0x00000004u),uvec3(0x80000000u, 0x60000000u, 0x20000000u),uvec3(0x00000004u, 0xa0000000u, 0x00000000u),uvec3(0xe000001eu, 0x00000000u, 0x00000000u));\n\nvoid mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    int index = int(fragCoord.y) * kBufferSize.x + int(fragCoord.x);\n    fragColor = (index < 39) ? b127_ieee754_encode(uvec4(lut[index], 0)) : vec4(0);\n}\n",
+   "name": "Buffer A",
+   "description": "",
+   "type": "buffer"
+  },
+  {
+   "inputs": [
+    {
+     "id": "4dXGRr",
+     "filepath": "/presets/tex00.jpg",
+     "type": "keyboard",
+     "channel": 3,
+     "sampler": {
+      "filter": "linear",
+      "wrap": "clamp",
+      "vflip": "true",
+      "srgb": "false",
+      "internal": "byte"
+     },
+     "published": 1
+    },
+    {
+     "id": "4dXGR8",
+     "filepath": "/media/previz/buffer00.png",
+     "type": "buffer",
+     "channel": 0,
+     "sampler": {
+      "filter": "linear",
+      "wrap": "clamp",
+      "vflip": "true",
+      "srgb": "false",
+      "internal": "byte"
+     },
+     "published": 1
+    },
+    {
+     "id": "XsXGR8",
+     "filepath": "/media/previz/buffer01.png",
+     "type": "buffer",
+     "channel": 1,
+     "sampler": {
+      "filter": "linear",
+      "wrap": "clamp",
+      "vflip": "true",
+      "srgb": "false",
+      "internal": "byte"
+     },
+     "published": 1
+    }
+   ],
+   "outputs": [
+    {
+     "id": "XsXGR8",
+     "channel": 0
+    }
+   ],
+   "code": "void setInt(uint val, uint offset, inout vec4 fragColor, in ivec2 outCoord) {\n    uint pixelNumber = offset / 3u;\n    uint texelY = pixelNumber / kRowLen;\n    uint texelX = pixelNumber - texelY * kRowLen;\n    ivec2 targetCoord = ivec2(texelX, texelY);\n    if (targetCoord == outCoord) {\n        uint component = offset - pixelNumber * 3u;\n        uvec4 word = b127_ieee754_decode(fragColor);\n        switch (component) {\n            case 0u:\n                word.x = val;\n                break;\n            case 1u:\n                word.y = val;\n                break;\n            case 2u:\n                word.z = val;\n                break;\n            default:\n                word.w = val;\n                break;\n        }\n        fragColor = b127_ieee754_encode(word);\n    }\n}\n\nconst uint kBankSize = 0x017bb000u;\n\nuint handleRead(uint addr) {\n    if (addr == 0x08000000u) {\n        return uint(iMouse.x);\n    }\n    if (addr == 0x08000001u) {\n        return uint(iMouse.y);\n    }\n    if (addr == 0x08000002u) {\n        return uint(iMouse.z);\n    }\n    if (addr == 0x08000003u) {\n        return uint(iMouse.w);\n    }\n    if (addr < kBankSize) {\n        // data bank read\n        return getInt(iChannel1, addr);\n    }\n    addr -= kBankSize;\n    if (addr < kBankSize) {\n        // screen read\n        return getInt(iChannel1, kScreenAddr + addr);\n    }\n    addr -= kBankSize;\n    if (addr < kBankSize) {\n        // keyboard read\n        uint row = addr / 256u;\n        uint col = addr - row * 256u;\n        return uint(texelFetch(iChannel3, ivec2(col, row), 0).x);\n    }\n}\n\n/*uint handleWrite(uint addr) {\n    if (addr < kBankSize) {\n        // data bank read\n        \n    }\n}*/\n\nvoid mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    ivec2 outCoord = ivec2(fragCoord);\n    fragColor = texelFetch(iChannel1, outCoord, 0);\n    uvec4 registers = iFrame == 0 ? uvec4(0) : b127_ieee754_decode(texelFetch(iChannel1, kBufferSize - 1, 0));\n\n    uint instruction = getInt(iChannel0, registers.z++);\n    uint op = (instruction >> 29);\n    int arg = int(instruction << 3) >> 3;\n    switch (op) {\n        case 0u:\n            registers.x = uint(arg);\n            break;\n        case 1u:\n            registers.xy = registers.yx;\n            break;\n        case 2u:\n            registers.x = uint(int(registers.x) + int(registers.y));\n            break;\n        case 3u:\n            registers.x = uint(int(registers.x) - int(registers.y));\n            break;\n        case 4u:\n            registers.x = handleRead(registers.x);\n            break;\n        case 5u:\n            //handleWrite(registers.x, registers.y, fragColor, outCoord);\n            setInt(registers.y, registers.x, fragColor, outCoord);\n            break;\n        case 6u:\n            registers.x = (int(registers.x) < int(registers.y)) ? 1u : 0u;\n            break;\n        case 7u:\n            if (int(registers.x) == 0) {\n                registers.z = uint(arg);\n            }\n            break;\n    }\n    \n    if (outCoord == kBufferSize - 1) {\n        fragColor = b127_ieee754_encode(registers);\n    }\n}\n",
+   "name": "Buffer B",
+   "description": "",
+   "type": "buffer"
+  }
+ ]
+}
